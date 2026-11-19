@@ -375,40 +375,46 @@ async function handleModal(interaction) {
   let   chanCount  = 0;
 
   for (const name of roles) {
-    try { await guild.roles.create({ name, reason: "AI Build" }); }
-    catch (e) { console.warn(`[olliE] role "${name}":`, e.message); }
+    const clean = name.trim().slice(0, 100);
+    if (!clean) continue;
+    try { await guild.roles.create({ name: clean, reason: "AI Build" }); }
+    catch (e) { console.warn(`[olliE] role "${clean}":`, e.message); }
     await sleep(800);
   }
 
   for (const block of categories) {
+    const catName = block.name.trim().slice(0, 100);
+    if (!catName) continue;
+
     let cat;
     try {
       cat = await guild.channels.create({
-        name: block.name,
+        name: catName,
         type: ChannelType.GuildCategory,
         reason: "AI Build",
       });
     } catch (e) {
-      console.warn(`[olliE] category "${block.name}":`, e.message);
+      console.warn(`[olliE] category "${catName}":`, e.message);
       continue;
     }
     await sleep(1100);
 
     for (const ch of (block.channels ?? [])) {
       const isVoice = ch.type === "voice";
-      const name    = isVoice
-        ? ch.name
-        : ch.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-_]/g, "");
+      let chName = isVoice
+        ? ch.name.trim().slice(0, 100)
+        : ch.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-_]/g, "").slice(0, 100);
+      if (!chName) chName = isVoice ? "vocal" : "general";
       try {
         await guild.channels.create({
-          name,
+          name: chName,
           type: isVoice ? ChannelType.GuildVoice : ChannelType.GuildText,
           parent: cat.id,
           reason: "AI Build",
         });
         chanCount++;
       } catch (e) {
-        console.warn(`[olliE] channel "${name}":`, e.message);
+        console.warn(`[olliE] channel "${chName}":`, e.message);
       }
       await sleep(1100);
     }
