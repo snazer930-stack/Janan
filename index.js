@@ -37,6 +37,23 @@ function cfg(guildId) {
   return guildConfig.get(guildId);
 }
 
+// ─── sanitize ─────────────────────────────────────────────────────────────────
+function sanitizeName(str, max = 100) {
+  return (str ?? "")
+    .trim()
+    .replace(/[^\w\s\-\u00C0-\u024F]/g, "")
+    .trim()
+    .slice(0, max) || "unnamed";
+}
+
+function sanitizeChannelName(str) {
+  return (str ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-_]/g, "")
+    .slice(0, 100) || "general";
+}
+
 // ─── client ───────────────────────────────────────────────────────────────────
 const client = new Client({
   intents: [
@@ -67,7 +84,7 @@ Rules:
 - Maximum 5 roles
 - Maximum 4 categories
 - Maximum 4 channels per category
-- Channel names: lowercase, no spaces, no special chars
+- Channel names: lowercase, no spaces, no special chars, ASCII only
 
 Respond with ONLY valid JSON, no markdown, no explanation:
 {
@@ -357,7 +374,13 @@ async function handleCommand(interaction) {
 // ─── modal handler ─────────────────────────────────────────────────────────────
 async function handleModal(interaction) {
   if (interaction.customId !== "buildModal") return;
-  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    await interaction.deferReply({ ephemeral: true });
+  } catch (e) {
+    console.error("[olliE] deferReply failed:", e.message);
+    return;
+  }
 
   const description = interaction.fields.getTextInputValue("description");
   const guild       = interaction.guild;
@@ -365,6 +388,7 @@ async function handleModal(interaction) {
   let structure;
   try {
     structure = await generateServerStructure(description);
+    console.log("[olliE] Gemini ok:", JSON.stringify(structure).slice(0, 300));
   } catch (e) {
     console.error("[olliE] AI error:", e.message);
     return interaction.editReply(`❌ Erreur IA : ${e.message}`);
@@ -375,17 +399,14 @@ async function handleModal(interaction) {
   let   chanCount  = 0;
 
   for (const name of roles) {
-    const clean = name.trim().slice(0, 100);
-    if (!clean) continue;
+    const clean = sanitizeName(name);
     try { await guild.roles.create({ name: clean, reason: "AI Build" }); }
     catch (e) { console.warn(`[olliE] role "${clean}":`, e.message); }
     await sleep(800);
   }
 
   for (const block of categories) {
-    const catName = block.name.trim().slice(0, 100);
-    if (!catName) continue;
-
+    const catName = sanitizeName(block.name);
     let cat;
     try {
       cat = await guild.channels.create({
@@ -400,15 +421,13 @@ async function handleModal(interaction) {
     await sleep(1100);
 
     for (const ch of (block.channels ?? [])) {
-      const isVoice = ch.type === "voice";
-      let chName = isVoice
-        ? ch.name.trim().slice(0, 100)
-        : ch.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-_]/g, "").slice(0, 100);
-      if (!chName) chName = isVoice ? "vocal" : "general";
+      const chName = ch.type === "voice"
+        ? sanitizeName(ch.name)
+        : sanitizeChannelName(ch.name);
       try {
         await guild.channels.create({
           name: chName,
-          type: isVoice ? ChannelType.GuildVoice : ChannelType.GuildText,
+          type: ch.type === "voice" ? ChannelType.GuildVoice : ChannelType.GuildText,
           parent: cat.id,
           reason: "AI Build",
         });
