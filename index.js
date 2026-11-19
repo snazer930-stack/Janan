@@ -17,6 +17,7 @@ const {
   EmbedBuilder,
   ButtonBuilder,
   ButtonStyle,
+  MessageFlags,
 } = require("discord.js");
 
 // ─── env ───────────────────────────────────────────────────────────────────────
@@ -197,7 +198,7 @@ const COMMANDS = [
 ].map(c => c.toJSON());
 
 // ─── ready ─────────────────────────────────────────────────────────────────────
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`[olliE] ${client.user.tag} — ready.`);
   const rest = new REST({ version: "10" }).setToken(BOT_TOKEN);
   try {
@@ -243,7 +244,7 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isButton())           return await handleButton(interaction);
   } catch (e) {
     console.error("[olliE] interaction error:", e.message, e.stack);
-    const reply = { content: `❌ Erreur : ${e.message}`, ephemeral: true };
+    const reply = { content: `❌ Erreur : ${e.message}`, flags: MessageFlags.Ephemeral };
     if (interaction.deferred || interaction.replied)
       interaction.editReply(reply).catch(() => {});
     else
@@ -265,10 +266,7 @@ async function handleCommand(interaction) {
           .setCustomId("description")
           .setLabel("Décris ton serveur en quelques phrases")
           .setStyle(TextInputStyle.Paragraph)
-          .setPlaceholder(
-            "Ex: Un serveur de vente de scripts FiveM avec une section staff, " +
-            "une boutique, un support client et un salon communautaire avec vocal."
-          )
+          .setPlaceholder("Ex: serveur FiveM avec staff, boutique et support.")
           .setRequired(true)
       )
     );
@@ -292,7 +290,7 @@ async function handleCommand(interaction) {
     const gagnants = interaction.options.getInteger("gagnants");
     const prix     = interaction.options.getString("prix");
     const ms       = parseDuration(durée);
-    if (!ms) return interaction.reply({ content: "❌ Durée invalide. Exemples : 30s 10m 2h 1d", ephemeral: true });
+    if (!ms) return interaction.reply({ content: "❌ Durée invalide. Exemples : 30s 10m 2h 1d", flags: MessageFlags.Ephemeral });
 
     const endsAt = Math.floor((Date.now() + ms) / 1000);
     const embed = new EmbedBuilder()
@@ -332,7 +330,7 @@ async function handleCommand(interaction) {
   if (commandName === "clear") {
     const nombre  = interaction.options.getInteger("nombre");
     const deleted = await interaction.channel.bulkDelete(nombre, true);
-    return interaction.reply({ content: `✅ **${deleted.size}** messages supprimés.`, ephemeral: true });
+    return interaction.reply({ content: `✅ **${deleted.size}** messages supprimés.`, flags: MessageFlags.Ephemeral });
   }
 
   if (commandName === "ban") {
@@ -342,7 +340,7 @@ async function handleCommand(interaction) {
       await interaction.guild.members.ban(user, { reason: raison });
       return interaction.reply(`✅ **${user.tag}** banni. Raison : ${raison}`);
     } catch (e) {
-      return interaction.reply({ content: `❌ Impossible de bannir : ${e.message}`, ephemeral: true });
+      return interaction.reply({ content: `❌ Impossible de bannir : ${e.message}`, flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -353,7 +351,7 @@ async function handleCommand(interaction) {
       await interaction.guild.members.kick(user, raison);
       return interaction.reply(`✅ **${user.tag}** expulsé. Raison : ${raison}`);
     } catch (e) {
-      return interaction.reply({ content: `❌ Impossible d'expulser : ${e.message}`, ephemeral: true });
+      return interaction.reply({ content: `❌ Impossible d'expulser : ${e.message}`, flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -366,7 +364,7 @@ async function handleCommand(interaction) {
       );
       return interaction.reply(lock ? "🔒 Salon verrouillé." : "🔓 Salon déverrouillé.");
     } catch (e) {
-      return interaction.reply({ content: `❌ Échec : ${e.message}`, ephemeral: true });
+      return interaction.reply({ content: `❌ Échec : ${e.message}`, flags: MessageFlags.Ephemeral });
     }
   }
 }
@@ -376,7 +374,7 @@ async function handleModal(interaction) {
   if (interaction.customId !== "buildModal") return;
 
   try {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   } catch (e) {
     console.error("[olliE] deferReply failed:", e.message);
     return;
@@ -449,11 +447,11 @@ async function handleButton(interaction) {
   if (interaction.customId !== "giveaway_join") return;
   const participants = activeGiveaways.get(interaction.message.id);
   if (!participants)
-    return interaction.reply({ content: "❌ Ce giveaway est terminé.", ephemeral: true });
+    return interaction.reply({ content: "❌ Ce giveaway est terminé.", flags: MessageFlags.Ephemeral });
   if (participants.has(interaction.user.id))
-    return interaction.reply({ content: "Tu participes déjà !", ephemeral: true });
+    return interaction.reply({ content: "Tu participes déjà !", flags: MessageFlags.Ephemeral });
   participants.add(interaction.user.id);
-  return interaction.reply({ content: "✅ Tu participes !", ephemeral: true });
+  return interaction.reply({ content: "✅ Tu participes !", flags: MessageFlags.Ephemeral });
 }
 
 // ─── utils ─────────────────────────────────────────────────────────────────────
