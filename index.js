@@ -33,7 +33,6 @@ const client = new Client({
 let autoRoleId = null;
 let welcomeChannelId = null;
 
-// ====================== READY ======================
 client.once("clientReady", async () => {
   console.log(`[olliE] ${client.user.tag} — ready.`);
 
@@ -44,31 +43,59 @@ client.once("clientReady", async () => {
     new SlashCommandBuilder()
       .setName("autorole")
       .setDescription("Définir le rôle automatique")
-      .addRoleOption(o => o.setName("role").setDescription("Rôle à donner automatiquement").setRequired(true)),
+      .addRoleOption(o =>
+        o.setName("role")
+          .setDescription("Rôle à donner automatiquement")
+          .setRequired(true)),
     new SlashCommandBuilder()
       .setName("setwelcome")
       .setDescription("Définir le salon de bienvenue")
-      .addChannelOption(o => o.setName("salon").setDescription("Salon de bienvenue").setRequired(true)),
+      .addChannelOption(o =>
+        o.setName("salon")
+          .setDescription("Salon de bienvenue")
+          .setRequired(true)),
     new SlashCommandBuilder()
       .setName("giveaway")
       .setDescription("Lancer un giveaway")
-      .addStringOption(o => o.setName("durée").setDescription("Ex: 10m, 1h, 1d").setRequired(true))
-      .addIntegerOption(o => o.setName("gagnants").setDescription("Nombre de gagnants").setRequired(true))
-      .addStringOption(o => o.setName("prix").setDescription("Ce qu'on gagne").setRequired(true)),
+      .addStringOption(o =>
+        o.setName("durée")
+          .setDescription("Durée ex: 10m, 1h, 1d")
+          .setRequired(true))
+      .addIntegerOption(o =>
+        o.setName("gagnants")
+          .setDescription("Nombre de gagnants")
+          .setRequired(true))
+      .addStringOption(o =>
+        o.setName("prix")
+          .setDescription("Ce qu'on gagne")
+          .setRequired(true)),
     new SlashCommandBuilder()
       .setName("clear")
       .setDescription("Supprimer des messages")
-      .addIntegerOption(o => o.setName("nombre").setDescription("Nombre de messages à supprimer (1-100)").setRequired(true)),
+      .addIntegerOption(o =>
+        o.setName("nombre")
+          .setDescription("Nombre de messages à supprimer (1-100)")
+          .setRequired(true)),
     new SlashCommandBuilder()
       .setName("ban")
       .setDescription("Bannir un membre")
-      .addUserOption(o => o.setName("membre").setDescription("Membre à bannir").setRequired(true))
-      .addStringOption(o => o.setName("raison").setDescription("Raison du ban")),
+      .addUserOption(o =>
+        o.setName("membre")
+          .setDescription("Membre à bannir")
+          .setRequired(true))
+      .addStringOption(o =>
+        o.setName("raison")
+          .setDescription("Raison du ban")),
     new SlashCommandBuilder()
       .setName("kick")
       .setDescription("Expulser un membre")
-      .addUserOption(o => o.setName("membre").setDescription("Membre à expulser").setRequired(true))
-      .addStringOption(o => o.setName("raison").setDescription("Raison du kick")),
+      .addUserOption(o =>
+        o.setName("membre")
+          .setDescription("Membre à expulser")
+          .setRequired(true))
+      .addStringOption(o =>
+        o.setName("raison")
+          .setDescription("Raison du kick")),
     new SlashCommandBuilder()
       .setName("lock")
       .setDescription("Verrouiller le salon"),
@@ -86,7 +113,6 @@ client.once("clientReady", async () => {
   }
 });
 
-// ====================== BIENVENUE ======================
 client.on("guildMemberAdd", async (member) => {
   if (autoRoleId) {
     try { await member.roles.add(autoRoleId); } catch (e) {}
@@ -111,15 +137,15 @@ client.on("guildMemberAdd", async (member) => {
   }
 });
 
-// ====================== INTERACTIONS ======================
 client.on("interactionCreate", async (interaction) => {
 
-  // ---------- /build ----------
   if (interaction.isChatInputCommand() && interaction.commandName === "build") {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator))
       return interaction.reply({ content: "Réservé aux Administrateurs.", ephemeral: true });
 
-    const modal = new ModalBuilder().setCustomId("buildModal").setTitle("Construction du serveur");
+    const modal = new ModalBuilder()
+      .setCustomId("buildModal")
+      .setTitle("Construction du serveur");
 
     const rolesInput = new TextInputBuilder()
       .setCustomId("roles")
@@ -143,7 +169,6 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.showModal(modal);
   }
 
-  // ---------- TRAITEMENT FORMULAIRE ----------
   if (interaction.isModalSubmit() && interaction.customId === "buildModal") {
     await interaction.deferReply({ ephemeral: true });
 
@@ -201,7 +226,6 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply(`Serveur construit.\n• ${roleNames.length} rôles\n• ${structure.length} catégories`);
   }
 
-  // ---------- SETWELCOME ----------
   if (interaction.isChatInputCommand() && interaction.commandName === "setwelcome") {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator))
       return interaction.reply({ content: "Réservé aux Administrateurs.", ephemeral: true });
@@ -209,7 +233,6 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply(`Salon de bienvenue défini : ${interaction.options.getChannel("salon")}`);
   }
 
-  // ---------- AUTOROLE ----------
   if (interaction.isChatInputCommand() && interaction.commandName === "autorole") {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator))
       return interaction.reply({ content: "Réservé aux Administrateurs.", ephemeral: true });
@@ -217,7 +240,6 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply(`Auto-role défini : **${interaction.options.getRole("role").name}**`);
   }
 
-  // ---------- GIVEAWAY ----------
   if (interaction.isChatInputCommand() && interaction.commandName === "giveaway") {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild))
       return interaction.reply({ content: "Permission insuffisante.", ephemeral: true });
@@ -225,7 +247,6 @@ client.on("interactionCreate", async (interaction) => {
     const durée = interaction.options.getString("durée");
     const gagnants = interaction.options.getInteger("gagnants");
     const prix = interaction.options.getString("prix");
-
     const ms = parseDuration(durée);
     if (!ms) return interaction.reply({ content: "Durée invalide (ex: 10m, 1h, 1d)", ephemeral: true });
 
@@ -235,11 +256,14 @@ client.on("interactionCreate", async (interaction) => {
       .setColor("#5865F2");
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("giveaway_join").setLabel("Participer").setStyle(ButtonStyle.Primary).setEmoji("🎉")
+      new ButtonBuilder()
+        .setCustomId("giveaway_join")
+        .setLabel("Participer")
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji("🎉")
     );
 
     const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
-
     const participants = new Set();
     const collector = msg.createMessageComponentCollector({ time: ms });
 
@@ -260,17 +284,16 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // ---------- CLEAR ----------
   if (interaction.isChatInputCommand() && interaction.commandName === "clear") {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageMessages))
       return interaction.reply({ content: "Permission insuffisante.", ephemeral: true });
     const nombre = interaction.options.getInteger("nombre");
-    if (nombre < 1 || nombre > 100) return interaction.reply({ content: "Entre 1 et 100.", ephemeral: true });
+    if (nombre < 1 || nombre > 100)
+      return interaction.reply({ content: "Entre 1 et 100.", ephemeral: true });
     await interaction.channel.bulkDelete(nombre, true);
     return interaction.reply({ content: `**${nombre}** messages supprimés.`, ephemeral: true });
   }
 
-  // ---------- BAN ----------
   if (interaction.isChatInputCommand() && interaction.commandName === "ban") {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.BanMembers))
       return interaction.reply({ content: "Permission insuffisante.", ephemeral: true });
@@ -280,7 +303,6 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply(`**${user.tag}** a été banni.`);
   }
 
-  // ---------- KICK ----------
   if (interaction.isChatInputCommand() && interaction.commandName === "kick") {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.KickMembers))
       return interaction.reply({ content: "Permission insuffisante.", ephemeral: true });
@@ -290,7 +312,6 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply(`**${user.tag}** a été expulsé.`);
   }
 
-  // ---------- LOCK / UNLOCK ----------
   if (interaction.isChatInputCommand() && (interaction.commandName === "lock" || interaction.commandName === "unlock")) {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels))
       return interaction.reply({ content: "Permission insuffisante.", ephemeral: true });
@@ -302,7 +323,6 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ====================== UTILS ======================
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
