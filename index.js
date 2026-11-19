@@ -20,17 +20,17 @@ const {
 } = require("discord.js");
 
 // ─── env ───────────────────────────────────────────────────────────────────────
-const BOT_TOKEN  = process.env.BOT_TOKEN;
-const CLIENT_ID  = process.env.CLIENT_ID;
-const GEMINI_KEY = process.env.GEMINI_KEY;
+const BOT_TOKEN   = process.env.BOT_TOKEN;
+const CLIENT_ID   = process.env.CLIENT_ID;
+const GEMINI_KEY  = process.env.GEMINI_KEY;
 
 for (const [k, v] of Object.entries({ BOT_TOKEN, CLIENT_ID, GEMINI_KEY })) {
   if (!v) { console.error(`[olliE] missing env: ${k}`); process.exit(1); }
 }
 
-// ─── state (per-guild) ────────────────────────────────────────────────────────
-const guildConfig    = new Map(); // guildId → { autoRoleId, welcomeChannelId }
-const activeGiveaways = new Map(); // messageId → Set<userId>
+// ─── state ────────────────────────────────────────────────────────────────────
+const guildConfig     = new Map();
+const activeGiveaways = new Map();
 
 function cfg(guildId) {
   if (!guildConfig.has(guildId)) guildConfig.set(guildId, {});
@@ -47,16 +47,13 @@ const client = new Client({
   ],
 });
 
-// ─── Gemini AI build ───────────────────────────────────────────────────────────
-/**
- * generateServerStructure
- * @param {string} description
- * @returns {{ roles: string[], categories: Array<{name:string, channels:Array<{name:string,type:"text"|"voice"}>}> }}
- */
+// ─── Gemini ────────────────────────────────────────────────────────────────────
 async function generateServerStructure(description) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-    {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+
+  let res;
+  try {
+    res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -83,21 +80,37 @@ Respond with ONLY valid JSON in this exact format, no markdown, no explanation:
         }],
         generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
       }),
-    }
-  );
+    });
+  } catch (e) {
+    throw new Error(`Fetch réseau échoué : ${e.message}`);
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Gemini ${res.status}: ${body}`);
+    throw new Error(`Gemini HTTP ${res.status} : ${body}`);
   }
 
-  const data   = await res.json();
-  const raw    = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
-  const clean  = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-  const parsed = JSON.parse(clean);
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    throw new Error(`Réponse Gemini non-JSON : ${e.message}`);
+  }
+
+  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+  if (!raw) throw new Error("Gemini a renvoyé une réponse vide");
+
+  const clean = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(clean);
+  } catch (e) {
+    throw new Error(`JSON invalide de Gemini : ${clean.slice(0, 200)}`);
+  }
 
   if (!Array.isArray(parsed.roles) || !Array.isArray(parsed.categories))
-    throw new Error("Gemini response missing required keys");
+    throw new Error(`Structure manquante — reçu : ${JSON.stringify(parsed).slice(0, 200)}`);
 
   return parsed;
 }
@@ -206,8 +219,8 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isModalSubmit())      return await handleModal(interaction);
     if (interaction.isButton())           return await handleButton(interaction);
   } catch (e) {
-    console.error("[olliE] interaction error:", e);
-    const reply = { content: "Erreur interne.", ephemeral: true };
+    console.error("[olliE] interaction error:", e.message, e.stack);
+    const reply = { content: `❌ Erreur : ${e.message}`, ephemeral: true };
     if (interaction.deferred || interaction.replied)
       interaction.editReply(reply).catch(() => {});
     else
@@ -219,7 +232,6 @@ client.on("interactionCreate", async (interaction) => {
 async function handleCommand(interaction) {
   const { commandName, guild } = interaction;
 
-  // /build
   if (commandName === "build") {
     const modal = new ModalBuilder()
       .setCustomId("buildModal")
@@ -240,27 +252,24 @@ async function handleCommand(interaction) {
     return interaction.showModal(modal);
   }
 
-  // /autorole
   if (commandName === "autorole") {
     const role = interaction.options.getRole("role");
     cfg(guild.id).autoRoleId = role.id;
     return interaction.reply(`✅ Auto-role défini : **${role.name}**`);
   }
 
-  // /setwelcome
   if (commandName === "setwelcome") {
     const salon = interaction.options.getChannel("salon");
     cfg(guild.id).welcomeChannelId = salon.id;
     return interaction.reply(`✅ Salon de bienvenue défini : ${salon}`);
   }
 
-  // /giveaway
   if (commandName === "giveaway") {
     const durée    = interaction.options.getString("durée");
     const gagnants = interaction.options.getInteger("gagnants");
     const prix     = interaction.options.getString("prix");
     const ms       = parseDuration(durée);
-    if (!ms) return interaction.reply({ content: "Durée invalide. Exemples : 30s 10m 2h 1d", ephemeral: true });
+    if (!ms) return interaction.reply({ content: "❌ Durée invalide. Exemples : 30s 10m 2h 1d", ephemeral: true });
 
     const endsAt = Math.floor((Date.now() + ms) / 1000);
     const embed = new EmbedBuilder()
@@ -282,33 +291,27 @@ async function handleCommand(interaction) {
     setTimeout(async () => {
       const participants = activeGiveaways.get(msg.id) ?? new Set();
       activeGiveaways.delete(msg.id);
-
       const pool    = [...participants];
       const winners = pool.sort(() => 0.5 - Math.random()).slice(0, gagnants);
       const winText = winners.length > 0 ? winners.map(id => `<@${id}>`).join(", ") : "Personne";
-
       const endEmbed = EmbedBuilder.from(embed)
         .setDescription(`**Prix :** ${prix}\n**Gagnants :** ${winText}\n**Terminé**`)
         .setColor("#57F287");
-
       await msg.edit({ embeds: [endEmbed], components: [] }).catch(() => {});
       if (winners.length > 0)
         await interaction.channel
           .send(`🎉 Félicitations ${winText} ! Vous avez gagné **${prix}** !`)
           .catch(() => {});
     }, ms);
-
     return;
   }
 
-  // /clear
   if (commandName === "clear") {
     const nombre  = interaction.options.getInteger("nombre");
     const deleted = await interaction.channel.bulkDelete(nombre, true);
     return interaction.reply({ content: `✅ **${deleted.size}** messages supprimés.`, ephemeral: true });
   }
 
-  // /ban
   if (commandName === "ban") {
     const user   = interaction.options.getUser("membre");
     const raison = interaction.options.getString("raison") ?? "Aucune raison fournie";
@@ -320,7 +323,6 @@ async function handleCommand(interaction) {
     }
   }
 
-  // /kick
   if (commandName === "kick") {
     const user   = interaction.options.getUser("membre");
     const raison = interaction.options.getString("raison") ?? "Aucune raison fournie";
@@ -332,7 +334,6 @@ async function handleCommand(interaction) {
     }
   }
 
-  // /lock + /unlock
   if (commandName === "lock" || commandName === "unlock") {
     const lock = commandName === "lock";
     try {
@@ -359,7 +360,7 @@ async function handleModal(interaction) {
   try {
     structure = await generateServerStructure(description);
   } catch (e) {
-    console.error("[olliE] AI error:", e);
+    console.error("[olliE] AI error:", e.message);
     return interaction.editReply(`❌ Erreur IA : ${e.message}`);
   }
 
