@@ -20,9 +20,9 @@ const {
 } = require("discord.js");
 
 // ─── env ───────────────────────────────────────────────────────────────────────
-const BOT_TOKEN   = process.env.BOT_TOKEN;
-const CLIENT_ID   = process.env.CLIENT_ID;
-const GEMINI_KEY  = process.env.GEMINI_KEY;
+const BOT_TOKEN  = process.env.BOT_TOKEN;
+const CLIENT_ID  = process.env.CLIENT_ID;
+const GEMINI_KEY = process.env.GEMINI_KEY;
 
 for (const [k, v] of Object.entries({ BOT_TOKEN, CLIENT_ID, GEMINI_KEY })) {
   if (!v) { console.error(`[olliE] missing env: ${k}`); process.exit(1); }
@@ -59,11 +59,17 @@ async function generateServerStructure(description) {
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: `You are a Discord server architect. Based on this description, generate a server structure.
+            text: `You are a Discord server architect. Generate a compact server structure.
 
 Description: ${description}
 
-Respond with ONLY valid JSON in this exact format, no markdown, no explanation:
+Rules:
+- Maximum 5 roles
+- Maximum 4 categories
+- Maximum 4 channels per category
+- Channel names: lowercase, no spaces, no special chars
+
+Respond with ONLY valid JSON, no markdown, no explanation:
 {
   "roles": ["RoleName1", "RoleName2"],
   "categories": [
@@ -78,7 +84,7 @@ Respond with ONLY valid JSON in this exact format, no markdown, no explanation:
 }`,
           }],
         }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
       }),
     });
   } catch (e) {
