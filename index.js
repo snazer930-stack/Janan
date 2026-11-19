@@ -1,10 +1,16 @@
 // Node.js 18+ | discord.js v14 | file: index.js
 
-const { Client, GatewayIntentBits, ChannelType } = require("discord.js");
+const { Client, GatewayIntentBits, ChannelType, PermissionFlagsBits } = require("discord.js");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
 
 client.once("ready", () => {
   console.log(`[olliE] ${client.user.tag} — ready.`);
@@ -12,54 +18,29 @@ client.once("ready", () => {
 
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
-  if (!msg.member?.permissions.has("Administrator")) return;
+  if (!msg.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
 
   if (msg.content !== "!build") return;
 
   const guild = msg.guild;
-  await msg.reply("Construction en cours...");
+  const reply = await msg.reply("Construction en cours... (ça peut prendre 20-30 secondes)");
 
   const structure = [
     {
       category: "IMPORTANT",
-      channels: [
-        "annonces",
-        "maj",
-        "concours",
-        "partenariats",
-        "nos-adds",
-        "keydrop",
-        "vitrine",
-        "clowns",
-        "sources",
-      ],
+      channels: ["annonces", "maj", "concours", "partenariats", "nos-adds", "keydrop", "vitrine", "clowns", "sources"],
     },
     {
       category: "NOS SCRIPTS",
-      channels: [
-        "achat",
-        "tarifs",
-        "duel",
-        "lagger",
-        "speed-bypass",
-        "scripts-gratuits",
-      ],
+      channels: ["achat", "tarifs", "duel", "lagger", "speed-bypass", "scripts-gratuits"],
     },
     {
       category: "COMMUNAUTÉ",
-      channels: [
-        "discussion",
-        "echange",
-        "avis",
-        "key-bypass",
-      ],
+      channels: ["discussion", "echange", "avis", "key-bypass"],
     },
     {
       category: "STEAL",
-      channels: [
-        "meilleurs-steals",
-        "steal",
-      ],
+      channels: ["meilleurs-steals", "steal"],
     },
   ];
 
@@ -71,7 +52,7 @@ client.on("messageCreate", async (msg) => {
         type: ChannelType.GuildCategory,
         reason: "!build",
       });
-      await sleep(500);
+      await sleep(1200); // délai plus long pour éviter le rate-limit
     } catch (e) {
       console.error(`[err] cat ${block.category}: ${e.message}`);
       continue;
@@ -85,14 +66,14 @@ client.on("messageCreate", async (msg) => {
           parent: cat.id,
           reason: "!build",
         });
-        await sleep(500);
+        await sleep(1200); // important
       } catch (e) {
         console.error(`[err] ch ${chName}: ${e.message}`);
       }
     }
   }
 
-  await msg.reply("Done. Structure complète. ez.");
+  await reply.edit("Done. Structure complète.");
 });
 
 function sleep(ms) {
