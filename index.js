@@ -34,29 +34,47 @@ let autoRoleId = null;
 let welcomeChannelId = null;
 
 // ====================== READY ======================
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`[olliE] ${client.user.tag} — ready.`);
 
   const commands = [
-    new SlashCommandBuilder().setName("build").setDescription("Formulaire pour construire le serveur"),
-    new SlashCommandBuilder().setName("autorole").setDescription("Définir le rôle automatique")
-      .addRoleOption(o => o.setName("role").setDescription("Rôle à donner").setRequired(true)),
-    new SlashCommandBuilder().setName("setwelcome").setDescription("Définir le salon de bienvenue")
+    new SlashCommandBuilder()
+      .setName("build")
+      .setDescription("Formulaire pour construire le serveur"),
+    new SlashCommandBuilder()
+      .setName("autorole")
+      .setDescription("Définir le rôle automatique")
+      .addRoleOption(o => o.setName("role").setDescription("Rôle à donner automatiquement").setRequired(true)),
+    new SlashCommandBuilder()
+      .setName("setwelcome")
+      .setDescription("Définir le salon de bienvenue")
       .addChannelOption(o => o.setName("salon").setDescription("Salon de bienvenue").setRequired(true)),
-    new SlashCommandBuilder().setName("giveaway").setDescription("Lancer un giveaway")
+    new SlashCommandBuilder()
+      .setName("giveaway")
+      .setDescription("Lancer un giveaway")
       .addStringOption(o => o.setName("durée").setDescription("Ex: 10m, 1h, 1d").setRequired(true))
       .addIntegerOption(o => o.setName("gagnants").setDescription("Nombre de gagnants").setRequired(true))
       .addStringOption(o => o.setName("prix").setDescription("Ce qu'on gagne").setRequired(true)),
-    new SlashCommandBuilder().setName("clear").setDescription("Supprimer des messages")
-      .addIntegerOption(o => o.setName("nombre").setDescription("1-100").setRequired(true)),
-    new SlashCommandBuilder().setName("ban").setDescription("Bannir un membre")
-      .addUserOption(o => o.setName("membre").setRequired(true))
-      .addStringOption(o => o.setName("raison")),
-    new SlashCommandBuilder().setName("kick").setDescription("Expulser un membre")
-      .addUserOption(o => o.setName("membre").setRequired(true))
-      .addStringOption(o => o.setName("raison")),
-    new SlashCommandBuilder().setName("lock").setDescription("Verrouiller le salon"),
-    new SlashCommandBuilder().setName("unlock").setDescription("Déverrouiller le salon"),
+    new SlashCommandBuilder()
+      .setName("clear")
+      .setDescription("Supprimer des messages")
+      .addIntegerOption(o => o.setName("nombre").setDescription("Nombre de messages à supprimer (1-100)").setRequired(true)),
+    new SlashCommandBuilder()
+      .setName("ban")
+      .setDescription("Bannir un membre")
+      .addUserOption(o => o.setName("membre").setDescription("Membre à bannir").setRequired(true))
+      .addStringOption(o => o.setName("raison").setDescription("Raison du ban")),
+    new SlashCommandBuilder()
+      .setName("kick")
+      .setDescription("Expulser un membre")
+      .addUserOption(o => o.setName("membre").setDescription("Membre à expulser").setRequired(true))
+      .addStringOption(o => o.setName("raison").setDescription("Raison du kick")),
+    new SlashCommandBuilder()
+      .setName("lock")
+      .setDescription("Verrouiller le salon"),
+    new SlashCommandBuilder()
+      .setName("unlock")
+      .setDescription("Déverrouiller le salon"),
   ].map(c => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(BOT_TOKEN);
