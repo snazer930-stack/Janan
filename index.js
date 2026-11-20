@@ -66,7 +66,7 @@ const client = new Client({
 });
 
 // ─── Gemini ────────────────────────────────────────────────────────────────────
-async function generateServerStructure(description) {
+async function generateServerStructure(description, attempt = 1) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_KEY}`;
 
   let res;
@@ -107,6 +107,12 @@ Respond with ONLY valid JSON, no markdown, no explanation:
     });
   } catch (e) {
     throw new Error(`Fetch réseau échoué : ${e.message}`);
+  }
+
+  if (res.status === 503 && attempt < 3) {
+    console.warn(`[olliE] Gemini 503 — tentative ${attempt}/3, retry dans ${attempt * 3}s`);
+    await sleep(attempt * 3000);
+    return generateServerStructure(description, attempt + 1);
   }
 
   if (!res.ok) {
