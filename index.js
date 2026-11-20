@@ -1,4 +1,4 @@
-// Node.js 24 — discord.js v14 + Gemini 3.8 Flash (GRATUIT)
+// Node.js 24 — discord.js v14 + Gemini 2.0 Flash Lite (GRATUIT)
 // env: BOT_TOKEN, CLIENT_ID, GEMINI_KEY
 // run: node bot.js
 
@@ -67,7 +67,7 @@ const client = new Client({
 
 // ─── Gemini ────────────────────────────────────────────────────────────────────
 async function generateServerStructure(description, attempt = 1) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`;
 
   let res;
   try {
