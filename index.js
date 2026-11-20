@@ -1,4 +1,4 @@
-// Node.js 24 — discord.js v14 + Gemini 2.0 Flash (GRATUIT)
+// Node.js 24 — discord.js v14 + Gemini 3.8 Flash (GRATUIT)
 // env: BOT_TOKEN, CLIENT_ID, GEMINI_KEY
 // run: node bot.js
 
@@ -147,6 +147,11 @@ const COMMANDS = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   new SlashCommandBuilder()
+    .setName("clearchannels")
+    .setDescription("Supprimer tous les salons du serveur")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
     .setName("autorole")
     .setDescription("Définir le rôle automatique")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -271,6 +276,24 @@ async function handleCommand(interaction) {
       )
     );
     return interaction.showModal(modal);
+  }
+
+  if (commandName === "clearchannels") {
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("clearchannels_confirm")
+        .setLabel("⚠️ Confirmer la suppression")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("clearchannels_cancel")
+        .setLabel("Annuler")
+        .setStyle(ButtonStyle.Secondary)
+    );
+    return interaction.reply({
+      content: "⚠️ **Tu vas supprimer TOUS les salons du serveur.** Tu es sûr ?",
+      components: [row],
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   if (commandName === "autorole") {
@@ -444,14 +467,34 @@ async function handleModal(interaction) {
 
 // ─── button handler ────────────────────────────────────────────────────────────
 async function handleButton(interaction) {
-  if (interaction.customId !== "giveaway_join") return;
-  const participants = activeGiveaways.get(interaction.message.id);
-  if (!participants)
-    return interaction.reply({ content: "❌ Ce giveaway est terminé.", flags: MessageFlags.Ephemeral });
-  if (participants.has(interaction.user.id))
-    return interaction.reply({ content: "Tu participes déjà !", flags: MessageFlags.Ephemeral });
-  participants.add(interaction.user.id);
-  return interaction.reply({ content: "✅ Tu participes !", flags: MessageFlags.Ephemeral });
+
+  if (interaction.customId === "clearchannels_cancel") {
+    return interaction.update({ content: "❌ Annulé.", components: [] });
+  }
+
+  if (interaction.customId === "clearchannels_confirm") {
+    await interaction.update({ content: "🗑️ Suppression en cours...", components: [] });
+    const guild    = interaction.guild;
+    const channels = [...guild.channels.cache.values()];
+    let   deleted  = 0;
+    for (const ch of channels) {
+      try { await ch.delete("clearchannels"); deleted++; }
+      catch (e) { console.warn(`[olliE] delete "${ch.name}":`, e.message); }
+      await sleep(600);
+    }
+    console.log(`[olliE] clearchannels: ${deleted}/${channels.length} salons supprimés.`);
+    return;
+  }
+
+  if (interaction.customId === "giveaway_join") {
+    const participants = activeGiveaways.get(interaction.message.id);
+    if (!participants)
+      return interaction.reply({ content: "❌ Ce giveaway est terminé.", flags: MessageFlags.Ephemeral });
+    if (participants.has(interaction.user.id))
+      return interaction.reply({ content: "Tu participes déjà !", flags: MessageFlags.Ephemeral });
+    participants.add(interaction.user.id);
+    return interaction.reply({ content: "✅ Tu participes !", flags: MessageFlags.Ephemeral });
+  }
 }
 
 // ─── utils ─────────────────────────────────────────────────────────────────────
