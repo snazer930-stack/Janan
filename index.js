@@ -10,9 +10,9 @@ import { constants } from "fs";
 import { URL } from "url";
 
 const TOKEN      = process.env.BOT_TOKEN    ?? "FILL: bot token";
-const PORT       = process.env.SERVER_PORT  ?? process.env.PORT ?? 5000;
+const PORT       = 25689;
 const WEBHOOK    = process.env.LOG_WEBHOOK  ?? "FILL: discord webhook url";
-const BASE_URL   = process.env.BASE_URL     ?? "FILL: https://your-domain.com";
+const BASE_URL   = process.env.BASE_URL     ?? "https://g0j73tuxuu.apps.bot-hosting.cloud";
 const IPINFO_TOK = process.env.IPINFO_TOKEN ?? "";
 const LOG_FILE   = "./ip_log.json";
 const PREFIX     = "!";
