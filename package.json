@@ -1,8 +1,11 @@
 {
-  "name": "clone-bot",
-  "version": "1.0.0",
+  "name": "ip-logger-bot",
+  "version": "2.0.0",
+  "type": "module",
   "main": "index.js",
+  "scripts": { "start": "node index.js" },
   "dependencies": {
-    "discord.js": "^14.0.0"
+    "discord.js": "^14.15.3",
+    "express": "^4.19.2"
   }
 }
